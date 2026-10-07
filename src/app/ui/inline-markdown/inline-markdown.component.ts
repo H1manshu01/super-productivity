@@ -636,6 +636,22 @@ export class InlineMarkdownComponent implements OnInit, OnDestroy {
       cleaned = appended.replace(/\n\n- \[/g, '\n- [').replace(/^\n/g, '');
     }
 
+    // Commit to the live editor first, in ONE CodeMirror transaction, so the new
+    // document and caret land together and synchronously. Routing the edit back
+    // through `model` instead makes the editor replace its whole document on the
+    // next change-detection pass, which maps the caret to the document end; a
+    // deferred `setTimeout` then raced to restore it, so repeated clicks dropped
+    // the marker in arbitrary places (#10545). Once the doc already equals
+    // `cleaned`, the `model` write below is a no-op for the editor.
+    const liveEditor = cursorPos !== undefined ? this.liveEditorEl() : undefined;
+    if (liveEditor) {
+      liveEditor.applyTransform(() => ({
+        text: cleaned,
+        selectionStart: adjustedSelectionStart!,
+        selectionEnd: adjustedSelectionEnd ?? adjustedSelectionStart!,
+      }));
+    }
+
     // Update model with FINAL value and emit to parent.
     // This ensures Angular CD won't reset modelCopy to a stale pre-insertion value.
     this.model = cleaned;
@@ -645,7 +661,11 @@ export class InlineMarkdownComponent implements OnInit, OnDestroy {
     if (cursorPos !== undefined) {
       // Ensure editor stays open (blur may have set isShowEdit=false)
       this.isShowEdit.set(true);
-      this._setTextareaState(adjustedSelectionStart!, adjustedSelectionEnd);
+      // The live editor already carries the caret from applyTransform above; only
+      // the plain textarea still needs its selection restored on the next turn.
+      if (!liveEditor) {
+        this._setTextareaState(adjustedSelectionStart!, adjustedSelectionEnd);
+      }
     } else {
       this._toggleShowEdit(cleaned.length);
       this.modelCopy.set(cleaned);

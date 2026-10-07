@@ -188,6 +188,38 @@ describe('InlineMarkdownComponent', () => {
       );
     });
 
+    // #10545: clicking the checklist button must drop a new item directly below
+    // the caret's line and leave the caret on it, click after click — not scatter
+    // the marker. The commit has to land in the editor's own document and
+    // selection synchronously (one CodeMirror transaction); the old path wrote
+    // the whole document back through the model input and restored the caret from
+    // a deferred timer, which mapped the caret to the document end and raced, so
+    // the next click inserted in an arbitrary place.
+    it('inserts a new item below the caret line on every click (#10545)', async () => {
+      fixture.componentRef.setInput('isShowChecklistToggle', true);
+      await mountLiveEditor('Alpha line\nBravo line\nCharlie line');
+      const view = editorView();
+
+      // Caret at the end of "Alpha line".
+      view.dispatch({ selection: { anchor: 10, head: 10 } });
+      component.toggleChecklistMode(new Event('click'));
+
+      // Synchronous: no timer, no model round-trip needed for the edit to land.
+      expect(view.state.doc.toString()).toBe(
+        'Alpha line\n- [ ] \nBravo line\nCharlie line',
+      );
+      // Caret sits on the new empty checkbox line, ready to type.
+      expect(view.state.selection.main.head).toBe(17);
+
+      // A second click adds another item right below the first, not elsewhere.
+      component.toggleChecklistMode(new Event('click'));
+
+      expect(view.state.doc.toString()).toBe(
+        'Alpha line\n- [ ] \n- [ ] \nBravo line\nCharlie line',
+      );
+      expect(view.state.selection.main.head).toBe(24);
+    });
+
     // Typing must not save: a note is one op per edit session, not per keystroke.
     it("does not commit while typing, and commits on the editor's own change", async () => {
       await mountLiveEditor('before');
