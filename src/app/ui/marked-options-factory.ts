@@ -52,8 +52,11 @@ export const parseImageDimensionsFromTitle = (
 export const preprocessMarkdown = (markdown: string): string => {
   // Match: ![alt](url =WIDTHxHEIGHT) or ![alt](url =WIDTHx) or ![alt](url =xHEIGHT)
   // Capture groups: 1=alt, 2=url, 3=width, 4=height
+  // `\s*` after the opening paren mirrors marked's own native parsing of an
+  // (unsized) destination and the live editor's SIZED_IMAGE_RE, so the same
+  // synced note text sizes the image identically on both render paths (#10153).
   return markdown.replace(
-    /!\[([^\]]*)\]\(([^\s)]+)\s+=(\d*)x(\d*)\)/g,
+    /!\[([^\]]*)\]\(\s*([^\s)]+)\s+=(\d*)x(\d*)\)/g,
     (match, alt, url, width, height) => {
       // Create title attribute with width|height format
       const dimensions = `${width || ''}|${height || ''}`;
