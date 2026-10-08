@@ -657,6 +657,12 @@ export class InlineMarkdownComponent implements OnInit, OnDestroy {
     this.model = cleaned;
     this.isChecklistMode.set(isChecklist);
     this.changed.emit(cleaned);
+    // This emit is the single save for the edit. The live editor already holds
+    // `cleaned` (committed above via applyTransform, not through its own
+    // `changed` output), so its blur guard is stale and would re-fire the same
+    // value as a second, redundant update op. Sync the guard so blur stays
+    // silent — mirroring what the model-effect dispatch did before applyTransform.
+    liveEditor?.markEmitted(cleaned);
 
     if (cursorPos !== undefined) {
       // Ensure editor stays open (blur may have set isShowEdit=false)

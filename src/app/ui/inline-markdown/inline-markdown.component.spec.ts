@@ -20,6 +20,8 @@ import { Log } from '../../core/log';
 import { Location } from '@angular/common';
 import { EditorView } from '@codemirror/view';
 import { undo } from '@codemirror/commands';
+import { By } from '@angular/platform-browser';
+import { LiveMarkdownEditorComponent } from './live-markdown/live-markdown-editor.component';
 
 describe('InlineMarkdownComponent', () => {
   let component: InlineMarkdownComponent;
@@ -218,6 +220,37 @@ describe('InlineMarkdownComponent', () => {
         'Alpha line\n- [ ] \n- [ ] \nBravo line\nCharlie line',
       );
       expect(view.state.selection.main.head).toBe(24);
+    });
+
+    // #10566: one checklist click is one save. The click commits into the editor
+    // via applyTransform and emits the result eagerly — the single op. When the
+    // editor later blurs it commits again; it must recognise that value as
+    // already saved and stay silent, or blur re-fires the same document and the
+    // note caller dispatches a second, redundant update op. The editor detects
+    // lost focus on an async CodeMirror measure that is not deterministic under
+    // the headless test browser, so drive its commit-on-blur directly — the exact
+    // code a real blur runs. Without the fix its emit guard stays stale here and
+    // the same value is emitted twice.
+    it('saves a checklist click once, even after the editor blurs (#10566)', async () => {
+      fixture.componentRef.setInput('isShowChecklistToggle', true);
+      await mountLiveEditor('Alpha line\nBravo line');
+      const view = editorView();
+      view.dispatch({ selection: { anchor: 10, head: 10 } });
+      const liveEditor = fixture.debugElement.query(
+        By.directive(LiveMarkdownEditorComponent),
+      ).componentInstance as unknown as { commitOnBlur(): void };
+      spyOn(component.changed, 'emit');
+
+      component.toggleChecklistMode(new Event('click'));
+      // The click itself is the single save.
+      expect(component.changed.emit).toHaveBeenCalledOnceWith(
+        'Alpha line\n- [ ] \nBravo line',
+      );
+
+      // The editor blurs: it must not re-fire the value already saved above.
+      liveEditor.commitOnBlur();
+
+      expect(component.changed.emit).toHaveBeenCalledTimes(1);
     });
 
     // Typing must not save: a note is one op per edit session, not per keystroke.
