@@ -670,30 +670,41 @@ describe('markedOptionsFactory', () => {
       expect(result).toBe('<p>Simple paragraph</p>');
     });
 
-    it('should convert h1. syntax to heading', () => {
+    const renderParagraph = (raw: string): string => {
       const mockParser = {
         parseInline: (tokens: any[]) =>
           tokens.map((t: any) => t.raw || t.text || '').join(''),
       };
       const paragraphRenderer = options.renderer!.paragraph.bind({ parser: mockParser });
+      return paragraphRenderer({ tokens: [{ type: 'text', raw, text: raw }] } as any);
+    };
 
-      const result = paragraphRenderer({
-        tokens: [{ type: 'text', raw: 'h1. My Heading', text: 'h1. My Heading' }],
-      } as any);
-      expect(result).toBe('<h1> My Heading</h1>');
+    it('should convert h1. syntax to heading', () => {
+      // The `hN. ` marker, including its single trailing space, is consumed.
+      expect(renderParagraph('h1. My Heading')).toBe('<h1>My Heading</h1>');
     });
 
     it('should convert h2. syntax to heading', () => {
-      const mockParser = {
-        parseInline: (tokens: any[]) =>
-          tokens.map((t: any) => t.raw || t.text || '').join(''),
-      };
-      const paragraphRenderer = options.renderer!.paragraph.bind({ parser: mockParser });
+      expect(renderParagraph('h2. Subheading')).toBe('<h2>Subheading</h2>');
+    });
 
-      const result = paragraphRenderer({
-        tokens: [{ type: 'text', raw: 'h2. Subheading', text: 'h2. Subheading' }],
-      } as any);
-      expect(result).toBe('<h2> Subheading</h2>');
+    it('should convert all heading levels h1. through h6.', () => {
+      expect(renderParagraph('h6. Deep')).toBe('<h6>Deep</h6>');
+    });
+
+    // The former `/h(\d)\./` fired on invalid levels and anywhere in the line.
+    // The anchored `[1-6]` rule, shared with the live editor, does not — so the
+    // note card and the inline editor now agree on these.
+    it('should not treat h7. as a heading (invalid level)', () => {
+      expect(renderParagraph('h7. Not a heading')).toBe('<p>h7. Not a heading</p>');
+    });
+
+    it('should not treat hN. without a following space as a heading', () => {
+      expect(renderParagraph('h1.NoSpace')).toBe('<p>h1.NoSpace</p>');
+    });
+
+    it('should not treat a mid-line hN. as a heading', () => {
+      expect(renderParagraph('see h1. below')).toBe('<p>see h1. below</p>');
     });
   });
 

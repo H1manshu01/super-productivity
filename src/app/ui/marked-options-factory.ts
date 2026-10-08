@@ -215,7 +215,12 @@ export const markedOptionsFactory = (): MarkedOptions => {
     const text = tokens ? this.parser.parseInline(tokens) : '';
     const split = text.split('\n');
     return split.reduce((acc, p, i) => {
-      const result = /h(\d)\./.exec(p);
+      // Jira-style `hN.` headings. Anchored at the line start and limited to
+      // `[1-6]` plus a single trailing space, matching the live editor's
+      // JIRA_HEADING_RE exactly so a note renders the same on the card and in
+      // the inline editor (#10153 case 2). The former `/h(\d)\./` also fired
+      // mid-line and on the invalid `h7.`–`h9.`.
+      const result = /^h([1-6])\.\s/.exec(p);
       if (result !== null) {
         const h = `h${result[1]}`;
         return acc + `<${h}>${p.replace(result[0], '')}</${h}>`;
