@@ -1203,9 +1203,9 @@
     },
     "SEARCH_BAR": {
       "INCLUDE_COMPLETED": "Include completed and archived tasks",
-      "INFO": "Start typing to search for tasks or notes",
-      "NO_RESULTS": "No tasks or notes found matching your search",
-      "PLACEHOLDER": "Search for task, task notes or project notes"
+      "INFO": "Start typing to search for tasks, notes, projects or tags",
+      "NO_RESULTS": "No tasks, notes, projects or tags found matching your search",
+      "PLACEHOLDER": "Search for tasks, notes, projects or tags"
     },
     "SIMPLE_COUNTER": {
       "D_CONFIRM_REMOVE": {
