@@ -810,6 +810,16 @@ describe('preprocessMarkdown', () => {
     );
     expect(preprocessMarkdown('![a]( u =10x20)')).toBe('![a](u "10|20")');
   });
+
+  // #10153 Case 1 follow-up: the whitespace after the opening paren must not
+  // match a line break. A plain `\s*` would let marked join an image
+  // destination across a blank line and merge the two paragraphs, while the
+  // live editor (matching on a single-line slice) leaves it as raw text — a new
+  // parity gap in the other direction. Same-line whitespace only.
+  it('does not join an image destination across a blank line (#10153)', () => {
+    const input = '![a](\n\nu =10x20)';
+    expect(preprocessMarkdown(input)).toBe(input);
+  });
 });
 
 describe('escapeHtmlAttr', () => {
