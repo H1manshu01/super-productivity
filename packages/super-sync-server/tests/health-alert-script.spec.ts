@@ -1164,6 +1164,10 @@ describe('health-alert.sh alert damping', () => {
     const second = run(dumpTimeout);
 
     expect(second.mailLog).not.toContain('All checks passing.');
+
+    run();
+    const afterDump = run();
+    expect(afterDump.mailLog).toContain('All checks passing.');
   });
 
   it('still uses a probe that answers during a dump', () => {
