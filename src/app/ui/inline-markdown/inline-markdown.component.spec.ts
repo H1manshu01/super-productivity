@@ -238,7 +238,7 @@ describe('InlineMarkdownComponent', () => {
       view.dispatch({ selection: { anchor: 10, head: 10 } });
       const liveEditor = fixture.debugElement.query(
         By.directive(LiveMarkdownEditorComponent),
-      ).componentInstance as unknown as { commitOnBlur(): void };
+      ).componentInstance as LiveMarkdownEditorComponent;
       spyOn(component.changed, 'emit');
 
       component.toggleChecklistMode(new Event('click'));
