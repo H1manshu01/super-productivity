@@ -193,6 +193,9 @@ DOCKER_OK=true
 # here because the probe lives behind the Docker gate: under `set -u` a Docker-down run
 # would otherwise abort at the body-assembly line below.
 DB_PROBE_DETAIL=""
+# Set when a failed probe is excused by a running backup dump; such a run verified nothing,
+# so it must not count toward recovery.
+DB_PROBE_EXCUSED=false
 
 # 0. Check Docker daemon is accessible
 if ! docker info >/dev/null 2>&1; then
@@ -492,6 +495,8 @@ NODE
           "$DB_ERRFILE" 2>/dev/null | strip_control_chars "$DB_PROBE_ERR_MAX_BYTES")
         # Empty stderr is possible after a timeout, silent failure or malformed output.
         : "${DB_PROBE_DETAIL:=(no stderr captured)}"
+      else
+        DB_PROBE_EXCUSED=true
       fi
     fi
     rm -f "$DB_ERRFILE"
@@ -717,7 +722,7 @@ else
   # Only meaningful while a recovery is pending; a healthy retry also proves mail works
   # again and clears a sticky failure marker.
   RECOVERED=false
-  if [ -f "$ALERT_STATE_FILE" ] || [ -f "$MAIL_FAILED_FILE" ]; then
+  if ! $DB_PROBE_EXCUSED && { [ -f "$ALERT_STATE_FILE" ] || [ -f "$MAIL_FAILED_FILE" ]; }; then
     if [ -f "$CLEAN_RUN_SEEN_FILE" ]; then
       RECOVERED=true
     else

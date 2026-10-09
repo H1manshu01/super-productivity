@@ -1156,6 +1156,26 @@ describe('health-alert.sh alert damping', () => {
     expect(secondClean.mailLog).toContain('All checks passing.');
   });
 
+  it('does not declare recovery from runs whose probe failed during a dump', () => {
+    // An excused probe verified nothing, so it must not close an open incident.
+    const dumpTimeout = { FAKE_DB_EXIT: '124', FAKE_PG_DUMP_AGE: '3600' };
+    run({ FAKE_BAD_INDEX: 'operations_idx' });
+    run(dumpTimeout);
+    const second = run(dumpTimeout);
+
+    expect(second.mailLog).not.toContain('All checks passing.');
+  });
+
+  it('still uses a probe that answers during a dump', () => {
+    const result = run({
+      FAKE_PG_DUMP_AGE: '3600',
+      FAKE_LONG_Q: '1',
+      FAKE_LONGEST: '233',
+    });
+
+    expect(result.mailLog).toContain('1 query(s) active longer than 120s');
+  });
+
   it('restarts the healthy-run count when the problem comes back', () => {
     run(FAILING_PROBE);
     run();
