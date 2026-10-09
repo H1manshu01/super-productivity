@@ -706,6 +706,29 @@ describe('markedOptionsFactory', () => {
     it('should not treat a mid-line hN. as a heading', () => {
       expect(renderParagraph('see h1. below')).toBe('<p>see h1. below</p>');
     });
+
+    // Real end-to-end parse: `breaks: true` turns the soft line break into a
+    // `<br>` (no `\n` survives into the renderer), so these guard the multi-line
+    // Jira-heading shapes that the mock-parser cases above cannot (#10153 case
+    // 2). A heading and the prose that follows must render as separate blocks,
+    // matching the live editor line-by-line.
+    it('splits a heading from the body text that follows it', () => {
+      expect(parseWithFactory('h1. Title\nbody text').trim()).toBe(
+        '<h1>Title</h1><p>body text</p>',
+      );
+    });
+
+    it('turns only the heading line into a heading when prose comes first', () => {
+      expect(parseWithFactory('intro\nh2. Section').trim()).toBe(
+        '<p>intro</p><h2>Section</h2>',
+      );
+    });
+
+    it('handles headings interleaved with prose across a paragraph', () => {
+      expect(parseWithFactory('h1. One\nplain\nh3. Three').trim()).toBe(
+        '<h1>One</h1><p>plain</p><h3>Three</h3>',
+      );
+    });
   });
 
   // Note: URL auto-linking is handled automatically by marked v17 with gfm: true.
