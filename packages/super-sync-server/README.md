@@ -79,18 +79,27 @@ nano .env
 ./scripts/deploy.sh
 ```
 
-> **No releases, no durable pins.** `ghcr.io/super-productivity/supersync`
-> publishes only `latest` and `master-<sha>`, both built from `master`, so a
-> default deploy tracks upstream `master`. The registry keeps only the 15 most
-> recent versions, so a `master-<sha>` tag is not a durable pin and no rollback
-> target. `deploy.sh` also runs `git pull --ff-only` on your checkout first and
-> requires the image's revision label to match the latest commit that touched
-> the server's image inputs there, so setting `SUPERSYNC_IMAGE` to an older
-> `master-<sha>` fails that check. The deploy scripts and compose file come from
-> the checkout; migrations run from the image. Right after a push to `master`
-> the image can lag behind it (the build takes from several minutes to about an
-> hour). `deploy.sh` then stops with "image revision does not match" before
-> touching the running stack: wait for the
+> **The default deploy tracks `master`.** `latest` and `master-<sha>` are built
+> from `master`. Releases also publish `vX.Y.Z`; older releases have one only if
+> it was backfilled, so check the tag exists before pinning. `deploy.sh` runs
+> `git pull --ff-only` on your checkout first and requires the image's revision
+> label to match the latest commit that touched the server's image inputs there.
+> To run a release, deploy from its tag:
+>
+> ```bash
+> git fetch --tags && git checkout vX.Y.Z
+> # in .env: SUPERSYNC_IMAGE=ghcr.io/super-productivity/supersync:vX.Y.Z
+> ./scripts/deploy.sh
+> ```
+>
+> On a tag checkout `deploy.sh` warns that `git pull` failed; that is expected and
+> leaves the checkout untouched. A `master-<sha>` pin works the same way with
+> `git checkout <sha>`. The deploy scripts and compose file come from the
+> checkout; migrations run from the image.
+>
+> Right after a push to `master` the image can lag behind it (the build takes
+> from several minutes to about an hour). `deploy.sh` then stops with "image
+> revision does not match" before touching the running stack: wait for the
 > [image build](https://github.com/super-productivity/super-productivity/actions/workflows/supersync-docker.yml)
 > to finish and run it again.
 
