@@ -52,15 +52,11 @@ export const parseImageDimensionsFromTitle = (
 export const preprocessMarkdown = (markdown: string): string => {
   // Match: ![alt](url =WIDTHxHEIGHT) or ![alt](url =WIDTHx) or ![alt](url =xHEIGHT)
   // Capture groups: 1=alt, 2=url, 3=width, 4=height
-  // `[^\S\r\n]*` (same-line whitespace only) after the opening paren mirrors
-  // marked's own native parsing of an (unsized) destination and the live
-  // editor's SIZED_IMAGE_RE, so the same synced note text sizes the image
-  // identically on both render paths (#10153). It must not match newlines: a
-  // plain `\s*` would let marked join an image destination across a blank line
-  // and merge the paragraphs, which the live editor — matching on a single-line
-  // slice — cannot, reopening the parity gap in the other direction.
+  // Keep both whitespace runs on one line, matching the live editor's
+  // single-line SIZED_IMAGE_RE. Allowing `\s` here would let marked join an
+  // image destination across line breaks, reopening the render parity gap.
   return markdown.replace(
-    /!\[([^\]]*)\]\([^\S\r\n]*([^\s)]+)\s+=(\d*)x(\d*)\)/g,
+    /!\[([^\]]*)\]\([^\S\r\n]*([^\s)]+)[^\S\r\n]+=(\d*)x(\d*)\)/g,
     (match, alt, url, width, height) => {
       // Create title attribute with width|height format
       const dimensions = `${width || ''}|${height || ''}`;

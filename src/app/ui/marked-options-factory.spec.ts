@@ -820,6 +820,13 @@ describe('preprocessMarkdown', () => {
     const input = '![a](\n\nu =10x20)';
     expect(preprocessMarkdown(input)).toBe(input);
   });
+
+  it('does not join sizing syntax across LF or CRLF line breaks (#10153)', () => {
+    for (const lineBreak of ['\n', '\r\n']) {
+      const input = `![a](u${lineBreak}=10x20)`;
+      expect(preprocessMarkdown(input)).toBe(input);
+    }
+  });
 });
 
 describe('escapeHtmlAttr', () => {
