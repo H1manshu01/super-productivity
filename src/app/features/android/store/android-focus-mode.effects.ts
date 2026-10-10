@@ -1,4 +1,4 @@
-import { inject, Injectable } from '@angular/core';
+import { inject, Injectable, InjectionToken } from '@angular/core';
 import { createEffect, ofType } from '@ngrx/effects';
 import { createSelector, Store } from '@ngrx/store';
 import {
@@ -10,8 +10,11 @@ import {
   tap,
   withLatestFrom,
 } from 'rxjs/operators';
-import { IS_ANDROID_WEB_VIEW } from '../../../util/is-android-web-view';
-import { androidInterface } from '../android-interface';
+import {
+  IS_ANDROID_WEB_VIEW,
+  IS_ANDROID_WEB_VIEW_TOKEN,
+} from '../../../util/is-android-web-view';
+import { androidInterface, AndroidInterface } from '../android-interface';
 import {
   selectIsBreakActive,
   selectIsLongBreak,
@@ -78,6 +81,43 @@ export const hasFocusNotificationStateChanged = (
   if (prevTimer.purpose !== currTimer.purpose) return true;
   // Otherwise throttle elapsed-only updates to every 5 seconds
   return Math.abs(currTimer.elapsed - prevTimer.elapsed) >= 5000;
+};
+
+/**
+ * Which native focus service call an active session's state change needs.
+ * The service stops itself when its countdown completes, and Android 12+
+ * refuses a foreground-service start from the background. So a phase that
+ * Pomodoro auto-starts while the app is away (break, next session) can be active
+ * in app state with no service, and ACTION_UPDATE cannot revive it (#9531).
+ * A lost service is restarted on the next notification-relevant change, or on
+ * the first emission after a resume: a quick return stays below the 5s gate.
+ * Only a running timer restarts it: a stopped one is either paused (the service
+ * survives pauses) or about to complete, where a restart would replace the
+ * completion notification. `isNativeServiceRunning` is lazy because it crosses
+ * the JS bridge.
+ */
+export const getFocusServiceCall = ({
+  wasFocusModeActive,
+  isStateChanged,
+  isResumed,
+  isInBackground,
+  timer,
+  isNativeServiceRunning,
+}: {
+  wasFocusModeActive: boolean;
+  isStateChanged: boolean;
+  isResumed: boolean;
+  isInBackground: boolean;
+  timer: TimerState;
+  isNativeServiceRunning: () => boolean;
+}): 'start' | 'update' | null => {
+  if (!wasFocusModeActive) return 'start';
+  if (!isStateChanged && !isResumed) return null;
+  // Background restarts are refused and surface a misleading settings warning,
+  // so a lost service waits for the resume (or a foreground change) instead.
+  const canRestart = isResumed || !isInBackground;
+  if (timer.isRunning && canRestart && !isNativeServiceRunning()) return 'start';
+  return isStateChanged ? 'update' : null;
 };
 
 /**
@@ -217,8 +257,15 @@ export const parseNativeFocusModeData = (
   };
 };
 
+export const FOCUS_ANDROID_INTERFACE = new InjectionToken<AndroidInterface>(
+  'FOCUS_ANDROID_INTERFACE',
+  { providedIn: 'root', factory: () => androidInterface },
+);
+
 @Injectable()
 export class AndroidFocusModeEffects {
+  private _isAndroidWebView = inject(IS_ANDROID_WEB_VIEW_TOKEN);
+  private _androidInterface = inject(FOCUS_ANDROID_INTERFACE);
   private _store = inject(Store);
   private _hydrationState = inject(HydrationStateService);
   private _snackService = inject(SnackService);
@@ -229,6 +276,11 @@ export class AndroidFocusModeEffects {
   private _syncTrigger = inject(SyncTriggerService);
   private _dataInitState = inject(DataInitStateService);
   private _operationWriteFlush = inject(OperationWriteFlushService);
+  // Set on resume so the next emission checks the native service even when a
+  // quick return keeps the elapsed jump below the 5s update gate (#9531).
+  private _isNativeServiceCheckDue = false;
+  // Latest isInBackground$ value; gates restarting a lost native service.
+  private _isInBackground = false;
 
   /**
    * Ask for notification permission when the user STARTS a focus session.
@@ -263,7 +315,7 @@ export class AndroidFocusModeEffects {
 
   // Start/stop focus mode notification when timer state changes
   syncFocusModeToNotification$ =
-    IS_ANDROID_WEB_VIEW &&
+    this._isAndroidWebView &&
     createEffect(
       () =>
         this._store
@@ -322,24 +374,6 @@ export class AndroidFocusModeEffects {
               const wasFocusModeActive = !!prev && prev.timer.purpose !== null;
 
               if (isFocusModeActive) {
-                // Task totals are recovery data, so mirror even small edits.
-                // Updating this clock does not rebuild the native notification.
-                if (
-                  !wasFocusModeActive ||
-                  prev?.currentTask?.id !== currentTask?.id ||
-                  prev?.recoveryTask?.id !== recoveryTask?.id ||
-                  prev?.recoveryTask?.timeSpent !== recoveryTask?.timeSpent
-                ) {
-                  this._safeNativeCall(
-                    () =>
-                      androidInterface.updateFocusTask?.(
-                        recoveryTask?.id ?? null,
-                        recoveryTask?.timeSpent ?? 0,
-                        !!currentTask,
-                      ),
-                    'Failed to update focus task tracking',
-                  );
-                }
                 const title = this._getNotificationTitle(
                   mode,
                   isBreakActive,
@@ -347,8 +381,45 @@ export class AndroidFocusModeEffects {
                 );
                 const remainingMs = timer.duration > 0 ? timeRemaining : timer.elapsed; // Flowtime shows elapsed
 
-                // Start service if just became active, otherwise update
-                if (!wasFocusModeActive) {
+                const isStateChanged = hasFocusNotificationStateChanged(
+                  prev?.timer,
+                  timer,
+                  prev?.currentTask,
+                  currentTask,
+                );
+                const isResumed = this._isNativeServiceCheckDue;
+                this._isNativeServiceCheckDue = false;
+                // Start service if just became active or lost, otherwise update
+                const serviceCall = getFocusServiceCall({
+                  wasFocusModeActive,
+                  isStateChanged,
+                  isResumed,
+                  isInBackground: this._isInBackground,
+                  timer,
+                  // The native bridge reports a stopped service as 'null'.
+                  isNativeServiceRunning: () =>
+                    this._androidInterface.getFocusModeElapsed?.() !== 'null',
+                });
+                // Every start needs fresh recovery data: a lost service has no task clock.
+                // Task totals are recovery data, so mirror even small edits.
+                // Updating this clock does not rebuild the native notification.
+                if (
+                  serviceCall === 'start' ||
+                  prev?.currentTask?.id !== currentTask?.id ||
+                  prev?.recoveryTask?.id !== recoveryTask?.id ||
+                  prev?.recoveryTask?.timeSpent !== recoveryTask?.timeSpent
+                ) {
+                  this._safeNativeCall(
+                    () =>
+                      this._androidInterface.updateFocusTask?.(
+                        recoveryTask?.id ?? null,
+                        recoveryTask?.timeSpent ?? 0,
+                        !!currentTask,
+                      ),
+                    'Failed to update focus task tracking',
+                  );
+                }
+                if (serviceCall === 'start') {
                   DroidLog.log('AndroidFocusModeEffects: Starting focus mode service', {
                     // eslint-disable-next-line local-rules/no-user-content-in-logs -- grandfathered log baseline (2026-09), not yet triaged
                     title,
@@ -359,7 +430,7 @@ export class AndroidFocusModeEffects {
                   });
                   this._safeNativeCall(
                     () =>
-                      androidInterface.startFocusModeService?.(
+                      this._androidInterface.startFocusModeService?.(
                         title,
                         timer.duration,
                         remainingMs,
@@ -370,14 +441,7 @@ export class AndroidFocusModeEffects {
                     'Failed to start focus mode notification',
                     true,
                   );
-                } else if (
-                  hasFocusNotificationStateChanged(
-                    prev?.timer,
-                    timer,
-                    prev?.currentTask,
-                    currentTask,
-                  )
-                ) {
+                } else if (serviceCall === 'update') {
                   // Only update if something significant changed
                   DroidLog.log('AndroidFocusModeEffects: Updating focus mode service', {
                     // eslint-disable-next-line local-rules/no-user-content-in-logs -- grandfathered log baseline (2026-09), not yet triaged
@@ -388,7 +452,7 @@ export class AndroidFocusModeEffects {
                   });
                   this._safeNativeCall(
                     () =>
-                      androidInterface.updateFocusModeService?.(
+                      this._androidInterface.updateFocusModeService?.(
                         title,
                         remainingMs,
                         !timer.isRunning,
@@ -402,12 +466,28 @@ export class AndroidFocusModeEffects {
                 // Focus mode ended, stop the service
                 DroidLog.log('AndroidFocusModeEffects: Stopping focus mode service');
                 this._safeNativeCall(
-                  () => androidInterface.stopFocusModeService?.(),
+                  () => this._androidInterface.stopFocusModeService?.(),
                   'Failed to stop focus mode service',
                 );
               }
             }),
           ),
+      { dispatch: false },
+    );
+
+  // Both flags flip in one handler, so a resume always pairs "foreground" with
+  // a pending check; isResumed also lets the helper restart regardless of order.
+  // A pause drops an unconsumed check so it cannot restart from the background.
+  trackAppBackgroundState$ =
+    this._isAndroidWebView &&
+    createEffect(
+      () =>
+        this._androidInterface.isInBackground$.pipe(
+          tap((isInBackground) => {
+            this._isInBackground = isInBackground;
+            this._isNativeServiceCheckDue = !isInBackground;
+          }),
+        ),
       { dispatch: false },
     );
 
